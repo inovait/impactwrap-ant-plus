@@ -529,7 +529,6 @@ export class USBDriver extends events.EventEmitter {
 			if (device && (device.deviceDescriptor.idVendor === this.idVendor && device.deviceDescriptor.idProduct === this.idProduct)) {
 				this.emit('detach', device);
 				usb.removeListener('detach', fn);
-				this.close();
 			}
 		}
 		usb.on('detach', fn);
