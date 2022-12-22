@@ -290,13 +290,13 @@ export interface ICancellationToken {
 
 class CancellationTokenListener {
 	_completed = false;
-	constructor(private fn: (d: any) => void, private cb: (err: Error) => void) { }
+	constructor(private fn: (d: any) => void, private cb: (err: Error | undefined, device: usb.Device | undefined) => void) { }
 	cancel() {
 		if (!this._completed) {
 			this._completed = true;
 			// @ts-ignore
 			usb.removeListener('attach', this.fn);
-			this.cb(new Error('Canceled'));
+			this.cb(new Error('Canceled'), undefined);
 		}
 	}
 }
@@ -488,7 +488,7 @@ export class USBDriver extends events.EventEmitter {
 	}
 
 
-	openAsync(cb: (err: Error) => void): ICancellationToken {
+	openAsync(cb: (err: Error | undefined, device: usb.Device | undefined) => void): ICancellationToken {
 		let ct: CancellationTokenListener;
 		const doOpen = () => {
 			try {
@@ -496,7 +496,7 @@ export class USBDriver extends events.EventEmitter {
 				if (result) {
 					ct._completed = true;
 					try {
-						cb(undefined);
+						cb(undefined, this.device);
 					} catch {
 						// ignore errors
 					}
@@ -504,11 +504,11 @@ export class USBDriver extends events.EventEmitter {
 					return false;
 				}
 			} catch (err) {
-				cb(err);
+				cb(err, undefined);
 			}
 			return true;
 		};
-		const fn = (d) => {
+		const fn = (d: usb.Device) => {
 			if (!d || (d.deviceDescriptor.idVendor === this.idVendor && d.deviceDescriptor.idProduct === this.idProduct)) {
 				if (doOpen()) {
 					// @ts-ignore
@@ -522,6 +522,17 @@ export class USBDriver extends events.EventEmitter {
 			setImmediate(() => usb.emit('attach', this.device));
 		}
 		return ct = new CancellationTokenListener(fn, cb);
+	}
+
+	listenOnDetach() {
+		const fn = (device: usb.Device) => {
+			if (device && (device.deviceDescriptor.idVendor === this.idVendor && device.deviceDescriptor.idProduct === this.idProduct)) {
+				this.emit('detach', device);
+				usb.removeListener('detach', fn);
+				this.close();
+			}
+		}
+		usb.on('detach', fn);
 	}
 
 	close() {
@@ -641,13 +652,13 @@ export class USBDriver extends events.EventEmitter {
 }
 
 export class GarminStick2 extends USBDriver {
-	constructor(dbgLevel = 0) {
-		super(0x0fcf, 0x1008, dbgLevel);
+	constructor(dbgLevel = 0, props = {}) {
+		super(0x0fcf, 0x1008, dbgLevel, props);
 	}
 }
 
 export class GarminStick3 extends USBDriver {
-	constructor(dbgLevel = 0) {
+	constructor(dbgLevel = 0, props = {}) {
 		super(0x0fcf, 0x1009, dbgLevel);
 	}
 }
