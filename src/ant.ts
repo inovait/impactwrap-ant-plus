@@ -1,6 +1,8 @@
 import events = require('events');
 
-import usb = require('usb');
+// import usb = require('usb');
+
+import { getDeviceList, usb, Interface, InEndpoint, OutEndpoint } from 'usb';
 
 export enum Constants {
 	MESSAGE_TX_SYNC = 0xA4,
@@ -308,10 +310,10 @@ export class DeviceInfo extends usb.Device {
 export class USBDriver extends events.EventEmitter {
 	private static deviceInUse: usb.Device[] = [];
 	private device: usb.Device;
-	private iface: usb.Interface;
+	private iface: Interface;
 	private detachedKernelDriver = false;
-	private inEp: usb.InEndpoint & events.EventEmitter;
-	private outEp: usb.OutEndpoint & events.EventEmitter;
+	private inEp: InEndpoint & events.EventEmitter;
+	private outEp: OutEndpoint & events.EventEmitter;
 	private leftover: Buffer;
 	private usedChannels: number = 0;
 	private attachedSensors: BaseSensor[] = [];
@@ -330,7 +332,7 @@ export class USBDriver extends events.EventEmitter {
 
 	private getDevices() {
 		try {
-			const allDevices = usb.getDeviceList();
+			const allDevices = getDeviceList();
 			return allDevices
 				.filter((d) => d.deviceDescriptor.idVendor === this.idVendor && d.deviceDescriptor.idProduct === this.idProduct)
 				.filter(d => USBDriver.deviceInUse.indexOf(d) === -1);
@@ -344,7 +346,7 @@ export class USBDriver extends events.EventEmitter {
 	}
 
 	static listDevices( filterFn?: (d:usb.Device)=>boolean) {
-		const allDevices = usb.getDeviceList();
+		const allDevices = getDeviceList();
 		const info = [...allDevices];
 		info.forEach( d => (d as DeviceInfo).inUse = USBDriver.deviceInUse.indexOf(d)!==-1 ) 
 
@@ -405,7 +407,7 @@ export class USBDriver extends events.EventEmitter {
 		}
 		USBDriver.deviceInUse.push(this.device);
 		this.waitingForStartup = true;
-		this.inEp = this.iface.endpoints[0] as usb.InEndpoint;
+		this.inEp = this.iface.endpoints[0] as InEndpoint;
 
 		this.inEp.on('data', (data: Buffer) => {
 			if (!data.length) {
@@ -456,7 +458,7 @@ export class USBDriver extends events.EventEmitter {
 
 		this.inEp.startPoll();
 
-		this.outEp = this.iface.endpoints[1] as usb.OutEndpoint;
+		this.outEp = this.iface.endpoints[1] as OutEndpoint;
 
 		let startupCnt = 0;
 		let tsStart = Date.now();
