@@ -1,6 +1,8 @@
 import events = require('events');
 
-import usb = require('usb');
+// import usb = require('usb');
+
+import { getDeviceList, usb, Interface, InEndpoint, OutEndpoint } from 'usb';
 
 export enum Constants {
 	MESSAGE_TX_SYNC = 0xA4,
@@ -290,13 +292,13 @@ export interface ICancellationToken {
 
 class CancellationTokenListener {
 	_completed = false;
-	constructor(private fn: (d: any) => void, private cb: (err: Error) => void) { }
+	constructor(private fn: (d: any) => void, private cb: (err: Error | undefined, device: usb.Device | undefined) => void) { }
 	cancel() {
 		if (!this._completed) {
 			this._completed = true;
 			// @ts-ignore
 			usb.removeListener('attach', this.fn);
-			this.cb(new Error('Canceled'));
+			this.cb(new Error('Canceled'), undefined);
 		}
 	}
 }
@@ -308,10 +310,10 @@ export class DeviceInfo extends usb.Device {
 export class USBDriver extends events.EventEmitter {
 	private static deviceInUse: usb.Device[] = [];
 	private device: usb.Device;
-	private iface: usb.Interface;
+	private iface: Interface;
 	private detachedKernelDriver = false;
-	private inEp: usb.InEndpoint & events.EventEmitter;
-	private outEp: usb.OutEndpoint & events.EventEmitter;
+	private inEp: InEndpoint & events.EventEmitter;
+	private outEp: OutEndpoint & events.EventEmitter;
 	private leftover: Buffer;
 	private usedChannels: number = 0;
 	private attachedSensors: BaseSensor[] = [];
@@ -330,7 +332,7 @@ export class USBDriver extends events.EventEmitter {
 
 	private getDevices() {
 		try {
-			const allDevices = usb.getDeviceList();
+			const allDevices = getDeviceList();
 			return allDevices
 				.filter((d) => d.deviceDescriptor.idVendor === this.idVendor && d.deviceDescriptor.idProduct === this.idProduct)
 				.filter(d => USBDriver.deviceInUse.indexOf(d) === -1);
@@ -344,7 +346,7 @@ export class USBDriver extends events.EventEmitter {
 	}
 
 	static listDevices( filterFn?: (d:usb.Device)=>boolean) {
-		const allDevices = usb.getDeviceList();
+		const allDevices = getDeviceList();
 		const info = [...allDevices];
 		info.forEach( d => (d as DeviceInfo).inUse = USBDriver.deviceInUse.indexOf(d)!==-1 ) 
 
@@ -405,7 +407,7 @@ export class USBDriver extends events.EventEmitter {
 		}
 		USBDriver.deviceInUse.push(this.device);
 		this.waitingForStartup = true;
-		this.inEp = this.iface.endpoints[0] as usb.InEndpoint;
+		this.inEp = this.iface.endpoints[0] as InEndpoint;
 
 		this.inEp.on('data', (data: Buffer) => {
 			if (!data.length) {
@@ -456,7 +458,7 @@ export class USBDriver extends events.EventEmitter {
 
 		this.inEp.startPoll();
 
-		this.outEp = this.iface.endpoints[1] as usb.OutEndpoint;
+		this.outEp = this.iface.endpoints[1] as OutEndpoint;
 
 		let startupCnt = 0;
 		let tsStart = Date.now();
@@ -488,7 +490,7 @@ export class USBDriver extends events.EventEmitter {
 	}
 
 
-	openAsync(cb: (err: Error) => void): ICancellationToken {
+	openAsync(cb: (err: Error | undefined, device: usb.Device | undefined) => void): ICancellationToken {
 		let ct: CancellationTokenListener;
 		const doOpen = () => {
 			try {
@@ -496,7 +498,7 @@ export class USBDriver extends events.EventEmitter {
 				if (result) {
 					ct._completed = true;
 					try {
-						cb(undefined);
+						cb(undefined, this.device);
 					} catch {
 						// ignore errors
 					}
@@ -504,11 +506,11 @@ export class USBDriver extends events.EventEmitter {
 					return false;
 				}
 			} catch (err) {
-				cb(err);
+				cb(err, undefined);
 			}
 			return true;
 		};
-		const fn = (d) => {
+		const fn = (d: usb.Device) => {
 			if (!d || (d.deviceDescriptor.idVendor === this.idVendor && d.deviceDescriptor.idProduct === this.idProduct)) {
 				if (doOpen()) {
 					// @ts-ignore
@@ -522,6 +524,16 @@ export class USBDriver extends events.EventEmitter {
 			setImmediate(() => usb.emit('attach', this.device));
 		}
 		return ct = new CancellationTokenListener(fn, cb);
+	}
+
+	listenOnDetach() {
+		const fn = (device: usb.Device) => {
+			if (device && (device.deviceDescriptor.idVendor === this.idVendor && device.deviceDescriptor.idProduct === this.idProduct)) {
+				this.emit('detach', device);
+				usb.removeListener('detach', fn);
+			}
+		}
+		usb.on('detach', fn);
 	}
 
 	close() {
@@ -641,13 +653,13 @@ export class USBDriver extends events.EventEmitter {
 }
 
 export class GarminStick2 extends USBDriver {
-	constructor(dbgLevel = 0) {
-		super(0x0fcf, 0x1008, dbgLevel);
+	constructor(dbgLevel = 0, props = {}) {
+		super(0x0fcf, 0x1008, dbgLevel, props);
 	}
 }
 
 export class GarminStick3 extends USBDriver {
-	constructor(dbgLevel = 0) {
+	constructor(dbgLevel = 0, props = {}) {
 		super(0x0fcf, 0x1009, dbgLevel);
 	}
 }

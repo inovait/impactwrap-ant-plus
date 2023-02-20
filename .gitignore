@@ -38,3 +38,6 @@ typings
 
 #Snyk settings
 .snyk
+
+# npmrc
+.npmrc
